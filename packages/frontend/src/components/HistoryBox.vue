@@ -11,6 +11,9 @@
       <div class="history-date">
         {{ dateUploaded }}
       </div>
+      <div class="history-delete">
+        <button class="primary-dark" @click="remove(id)">🗑️</button>
+      </div>
       <div class="history-download">
         <button class="primary-dark" @click="download(url, title)">💾</button>
       </div>
@@ -30,8 +33,12 @@ export default defineComponent({
   components: {
     PreviewBox,
   },
-  emits: ["on-error"],
+  emits: ["on-error", "on-delete"],
   props: {
+    id: {
+      type: String,
+      required: true,
+    },
     title: {
       type: String,
       required: true,
@@ -70,8 +77,13 @@ export default defineComponent({
         });
     };
 
+    const remove = (id: string) => {
+      emit("on-delete", id);
+    };
+
     return {
       download,
+      remove,
       preview,
       togglePreview,
     };

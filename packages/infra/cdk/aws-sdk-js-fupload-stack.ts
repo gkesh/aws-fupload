@@ -16,7 +16,7 @@ export class AwsSdkJsFUploadStack extends Stack {
     super(scope, id, props);
 
     const table = new dynamodb.Table(this, "uploads", {
-      partitionKey: { name: "uploadId", type: dynamodb.AttributeType.STRING },
+      partitionKey: { name: "fileId", type: dynamodb.AttributeType.STRING },
     });
 
     const api = new apigw.RestApi(this, "endpoint");
@@ -24,7 +24,7 @@ export class AwsSdkJsFUploadStack extends Stack {
     uploads.addMethod(
       "GET",
       new apigw.LambdaIntegration(
-        new FUploadApi(this, "listUploads", {
+        new FUploadApi(this, "retrieveUploads", {
           table,
           grantActions: ["dynamodb:Scan"],
         }).handler
@@ -42,23 +42,15 @@ export class AwsSdkJsFUploadStack extends Stack {
     const upload = uploads.addResource("{id}", {
       defaultCorsPreflightOptions: {
         allowOrigins: apigw.Cors.ALL_ORIGINS,
+        allowMethods: apigw.Cors.ALL_METHODS,
       },
     });
     upload.addMethod(
       "GET",
       new apigw.LambdaIntegration(
-        new FUploadApi(this, "getUpload", {
+        new FUploadApi(this, "fetchUpload", {
           table,
           grantActions: ["dynamodb:GetItem"],
-        }).handler
-      )
-    );
-    upload.addMethod(
-      "PUT",
-      new apigw.LambdaIntegration(
-        new FUploadApi(this, "updateUpload", {
-          table,
-          grantActions: ["dynamodb:UpdateItem"],
         }).handler
       )
     );
@@ -72,10 +64,9 @@ export class AwsSdkJsFUploadStack extends Stack {
       )
     );
 
-
     const filesBucket = new s3.Bucket(this, "files-bucket");
     filesBucket.addCorsRule({
-      allowedOrigins: apigw.Cors.ALL_ORIGINS, // NOT recommended for production code
+      allowedOrigins: apigw.Cors.ALL_ORIGINS,
       allowedMethods: [
         s3.HttpMethods.PUT,
         s3.HttpMethods.GET,

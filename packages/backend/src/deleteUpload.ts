@@ -1,31 +1,15 @@
-import crypto from "crypto";
-import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, DeleteItemCommand, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { marshall } from "@aws-sdk/util-dynamodb";
 import { success, failure } from "./libs/response";
 import { APIGatewayEvent } from "aws-lambda";
-import { Media } from "./models/media";
 
 export const handler = async (event: APIGatewayEvent) => {
-  const data = JSON.parse(event.body || "{}");
-
-  if (Object.keys(data).length === 0) {
-    return failure({
-      level: "GENERAL",
-      message: "Empty request recieved on server!",
-    });
-  }
+  const params = {
+    TableName: process.env.FUPLOAD_TABLE_NAME || "",
+    Key: marshall({ fileId: event.pathParameters?.id }),
+  };
 
   try {
-    const payload: Media = {
-        fileId: crypto.randomBytes(20).toString("hex"),
-        ...data,
-    } as Media;
-
-    const params = {
-      TableName: process.env.FUPLOAD_TABLE_NAME || "",
-      Item: marshall(payload),
-    };
-
     let client: DynamoDBClient;
 
     if (process.env.LOCALSTACK_HOSTNAME) {
@@ -38,8 +22,8 @@ export const handler = async (event: APIGatewayEvent) => {
       client = new DynamoDBClient({});
     }
 
-    await client.send(new PutItemCommand(params));
-    return success([payload]);
+    await client.send(new DeleteItemCommand(params));
+    return success([]);
   } catch (e) {
     console.log(e);
     return failure({

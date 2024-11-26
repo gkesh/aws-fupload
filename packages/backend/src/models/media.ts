@@ -4,7 +4,9 @@ export interface Media {
   fileId?: string;
   title: string;
   filename: string;
+  size: number;
+  mimetype: string;
   extension: Extension;
-  dateUploaded: Date;
+  dateUploaded: string;
   s3Key: string;
 }

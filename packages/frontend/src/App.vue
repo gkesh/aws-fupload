@@ -1,4 +1,5 @@
 <template>
+  <AppHeader @on-reload="loadHistory" />
   <main>
     <section class="upload">
       <form id="files">
@@ -16,7 +17,7 @@
       </form>
     </section>
     <section class="actions">
-      <button type="submit" class="success" @click="uploadFiles($event)">
+      <button type="submit" class="success" @click.prevent="uploadFiles">
         Upload
       </button>
       <button type="button" class="more" @click="incrementFileCount">
@@ -38,11 +39,13 @@
         <div v-if="history.length > 0">
           <HistoryBox
             v-for="(media, i) in history"
+            :id="media.fileId!"
             :title="media.title"
             :extension="media.extension"
             :date-uploaded="new Date(media.dateUploaded).toLocaleString()"
-            :url="server + '/uploads/' + media.filename"
+            :url="media.url!"
             :key="'media' + i"
+            @on-delete="removeUpload"
             @on-error="setError"
           />
         </div>
@@ -59,13 +62,18 @@
 import { defineComponent, onMounted, ref, Ref } from "vue";
 import UploadBox from "@/components/UploadBox.vue";
 import HistoryBox from "@/components/HistoryBox.vue";
+import AppHeader from "./layout/AppHeader.vue";
 import { Media, Extension } from "@/models/file";
+import { GATEWAY_URL } from "./config";
+import { Failure } from "./models/failure";
+import { putObject, getObjectUrl, deleteObject } from "./libs";
 
 export default defineComponent({
   name: "App",
   components: {
     UploadBox,
     HistoryBox,
+    AppHeader,
   },
   setup() {
     const server = "http://localhost:8081";
@@ -105,9 +113,54 @@ export default defineComponent({
       }, 3000);
     };
 
-    const uploadFiles = async (event: Event) => {
-      event.preventDefault();
+    const parseFileName = (str: string, substring: string) => {
+      const lastIndex = str.lastIndexOf(substring);
+      const before = str.slice(0, lastIndex);
+      const after = str.slice(lastIndex + 1);
+      return [before, after];
+    };
 
+    const processFile = async (f: File, key: string): Promise<Media | null> => {
+      try {
+        // Uploading files to S3
+        const s3Key = await putObject(f);
+
+        const [title, extension] = parseFileName(f.name, ".");
+        return {
+          title,
+          filename: f.name,
+          extension: extension as Extension,
+          dateUploaded: new Date().toLocaleString(),
+          mimetype: f.type,
+          size: f.size,
+          s3Key,
+        };
+      } catch (e) {
+        setError(`File ${key} failed to upload: ${(e as Error).message}`);
+        return null;
+      }
+    };
+
+    // Generate S3 Link from Key
+    const generateS3Url = async (key: string) => {
+      return await getObjectUrl(key);
+    };
+
+    const processResponse = async (response: Response): Promise<Media[]> => {
+      return await Promise.all(
+        (
+          await response.json()
+        ).map(async (item: Media) => {
+          const url = await generateS3Url(item.s3Key || "");
+          return {
+            ...item,
+            url,
+          };
+        })
+      );
+    };
+
+    const uploadFiles = async () => {
       const formData = new FormData(
         document.getElementById("files") as HTMLFormElement
       );
@@ -131,68 +184,84 @@ export default defineComponent({
         return;
       }
 
-      interface UploadResponse {
-        errors?: string[];
-        rejected?: { [fileId: string]: string };
-        uploaded?: { [fileId: string]: string };
-      }
+      const uploads = (
+        await Promise.all(
+          Array.from(formData).map(([key, file]) =>
+            processFile(file as File, key)
+          )
+        )
+      ).filter((item) => item !== null);
 
-      const data: UploadResponse = await fetch(`${server}/upload`, {
+      // Saving Upload to Database
+      const response = await fetch(`${GATEWAY_URL}uploads`, {
         method: "POST",
-        mode: "cors",
-        body: formData,
-      }).then((res) => res.json());
+        body: JSON.stringify(uploads),
+      });
 
-      if (data) {
-        if (data.rejected && Object.keys(data.rejected).length > 0) {
-          Object.entries(data.rejected).forEach(
-            ([file, message]: [string, string]) => {
-              setError(`File ${file} rejected: ${message}`);
-            }
-          );
-        }
-
-        if (data.uploaded && Object.keys(data.uploaded).length > 0) {
-          Object.entries(data.uploaded).forEach(
-            ([, filename]: [string, string]) => {
-              const [timestamp, ...uploadName] = filename.split("_");
-              const extension = filename.split(".").splice(-1)[0] as Extension;
-
-              // Skips invalid extensions and files that dont match naming schemes
-              const uploadedFile: Media = {
-                title: uploadName.join("_"),
-                filename,
-                extension,
-                dateUploaded: new Date(parseInt(timestamp, 10)),
-                s3Key: "",
-              };
-
-              // Pushing to history
-              history.value.push(uploadedFile);
-            }
-          );
-        }
+      if (response.status !== 200) {
+        const failure: Failure = (await response.json()) as Failure;
+        setError(`[${failure.level}] ${failure.message}`);
+        clearFiles();
+        return;
       }
+
+      const succesfulUploads = await processResponse(response);
+      history.value.push(...succesfulUploads);
 
       clearFiles();
     };
 
-    // Loading history data once mounted
-    onMounted(async () => {
-      const data = await fetch(`${server}/all`, {
-        method: "GET",
-        mode: "cors",
-      })
-        .then((res) => res.json())
-        .catch((error) => {
-          alert(error);
-          historyStatus.value = -1;
+    const loadHistory = async () => {
+      history.value = [];
+      historyStatus.value = 0;
+
+      const response = await fetch(`${GATEWAY_URL}uploads`);
+
+      if (response.status !== 200) {
+        const failure: Failure = (await response.json()) as Failure;
+        alert(`[${failure.level}] ${failure.message}`);
+        historyStatus.value = -1;
+      }
+
+      const uplaods = await processResponse(response);
+
+      history.value = uplaods as Media[];
+      historyStatus.value = 1;
+    };
+
+    const removeUpload = async (id: string) => {
+      // Find item
+      const item = history.value.filter((item) => item.fileId === id)[0];
+
+      if (item && item.s3Key && item.fileId) {
+        const response = await fetch(`${GATEWAY_URL}uploads/${item.fileId}`);
+
+        if (response.status !== 200) {
+          const failure: Failure = (await response.json()) as Failure;
+          setError(`[${failure.level}] ${failure.message}`);
+          return;
+        }
+
+        const upload = (await processResponse(response))[0];
+
+        // Remove item from S3
+        await deleteObject(item.s3Key);
+
+        // Delete item from dynamodb
+        await fetch(`${GATEWAY_URL}uploads/${item.fileId}`, {
+          method: "DELETE",
         });
 
-      if (historyStatus.value >= 0) {
-        history.value = data as Media[];
-        historyStatus.value = 1;
+        history.value = history.value.filter(
+          (hitem) => hitem.fileId !== upload.fileId
+        );
+        setError(`File deleted: ${upload.fileId}`);
       }
+    };
+
+    // Loading history data once mounted
+    onMounted(async () => {
+      await loadHistory();
     });
 
     return {
@@ -205,6 +274,8 @@ export default defineComponent({
       uploadFiles,
       setError,
       incrementFileCount,
+      loadHistory,
+      removeUpload,
       history,
       historyStatus,
     };
@@ -238,6 +309,12 @@ export default defineComponent({
   -moz-osx-font-smoothing: grayscale;
   text-align: center;
   color: var(--text);
+}
+
+body {
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
 }
 
 main {

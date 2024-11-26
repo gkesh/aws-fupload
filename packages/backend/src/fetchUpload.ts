@@ -6,7 +6,7 @@ import { Media } from "./models/media";
 
 export const handler = async (event: APIGatewayEvent) => {
   const params = {
-    TableName: process.env.NOTES_TABLE_NAME || "",
+    TableName: process.env.FUPLOAD_TABLE_NAME || "",
     Key: marshall({ fileId: event.pathParameters?.id }),
   };
 
@@ -29,8 +29,6 @@ export const handler = async (event: APIGatewayEvent) => {
     }
 
     const media = unmarshall(result.Item) as Media;
-
-    await client.send(new DeleteItemCommand(params));
     return success([media]);
   } catch (e) {
     console.log(e);
