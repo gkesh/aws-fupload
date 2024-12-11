@@ -1,4 +1,4 @@
-import { DynamoDBClient, DeleteItemCommand, GetItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
 import { success, failure } from "./libs/response";
 import { APIGatewayEvent } from "aws-lambda";
