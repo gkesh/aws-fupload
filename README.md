@@ -4,6 +4,10 @@ Leveraging AWS features to create an application that uploads file to a S3 bucke
 
 The project was developed to work with Localstack, and here are the instructions to run the application locally.
 
+> Here is the basic app architecture. It is extremely simple with not many features or mechanisms used.
+
+![App Architecture](screenshots/app-architecture.png)
+
 ## Setup LocalStack
 
 Step 1: Installing LocalStack
@@ -37,6 +41,10 @@ EXTRA_CORS_ALLOWED_ORIGINS=* localstack start
 # Or if you have the local domains figured out
 localstack start
 ```
+
+> LocalStack should start now as shown below
+
+![LocalStack Started](screenshots/localstack-ready.png)
 
 ## Setup and Deploy Application
 
